@@ -23,7 +23,7 @@ func NewRegisterAccountService(userAccountWriter repository.UserAccountWriter, u
 	}
 }
 
-// Register consumes a RegisterDTO, creates and persist a new UserAccountand and, returns a UserAccountDTO and error
+// Register consumes a request DTO, creates and persist a new UserAccount and, returns a response DTO and error
 func (s *RegisterAccountService) Register(req *dto.RegisterDTO) (*dto.UserAccountDTO, error) {
 
 	newemail, err := value_object.NewEmail(req.Email)

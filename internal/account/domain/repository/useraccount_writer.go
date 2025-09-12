@@ -4,7 +4,7 @@ import (
 	"rest-api-in-gin/internal/account/domain/model/entity"
 )
 
-// UserAccountChecker is a interface contract
+// UserAccountWriter is a interface contract
 type UserAccountWriter interface {
 	Create(useraccount *entity.UserAccount) error
 	// TODO
