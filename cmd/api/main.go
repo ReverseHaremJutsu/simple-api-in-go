@@ -1,122 +1,112 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	_ "github.com/joho/godotenv/autoload"
+	"github.com/segmentio/kafka-go"
 
 	accountappservice "rest-api-in-gin/internal/account/application/service"
 	accountdomainservice "rest-api-in-gin/internal/account/domain/service"
-	"rest-api-in-gin/internal/env"
-
-	accountinfrapersistence "rest-api-in-gin/internal/account/infrastructure/persistence"
 	accountinfrarepo "rest-api-in-gin/internal/account/infrastructure/repository"
 	accountpresenthttp "rest-api-in-gin/internal/account/presentation/http"
 
-	_ "github.com/joho/godotenv/autoload"
+	paymentappservice "rest-api-in-gin/internal/payment/application/service"
+	paymentdomainservice "rest-api-in-gin/internal/payment/domain/service"
+	paymentinfraconsumer "rest-api-in-gin/internal/payment/infrastructure/kafka/consumer"
+	paymentinfrarepo "rest-api-in-gin/internal/payment/infrastructure/repository"
+	paymentpresenthttp "rest-api-in-gin/internal/payment/presentation/http"
+
+	env "rest-api-in-gin/internal/env"
+	infrakafkaproducer "rest-api-in-gin/internal/infrastructure/kafka/producer"
+	persistence "rest-api-in-gin/internal/infrastructure/persistence"
 )
 
 func main() {
-	// -----------------------------
-	// 1️⃣ Initialize DB
-	// -----------------------------
+	// initialize database connection
 	dsn := env.GetEnvString("DATABASE_URL", "postgres://jacky:password@localhost:5432/mydb?sslmode=disable")
-	db, err := accountinfrapersistence.NewPostgresDB(dsn)
+	db, err := persistence.NewPostgresDB(dsn)
 	if err != nil {
 		log.Fatalf("failed to connect to DB: %v", err)
 	}
 
-	// -----------------------------
-	// 2️⃣ Initialize Repository
-	// -----------------------------
+	// initialize infrastructure repositories
 	userAccountChecker := accountinfrarepo.NewPostgresUserAccountChecker(db)
 	userAccountWriter := accountinfrarepo.NewPostgresUserAccountWriter(db)
 
-	// -----------------------------
-	// 3️⃣ Initialize Domain Service
-	// -----------------------------
+	walletWriter := paymentinfrarepo.NewPostgresWalletWriter(db)
+	walletReader := paymentinfrarepo.NewPostgresWalletReader(db)
+	walletChecker := paymentinfrarepo.NewPostgresWalletChecker(db)
+
+	// initialize domain services
 	userAccountDomainService := accountdomainservice.NewUserAccountDomainService(userAccountChecker)
+	walletDomainService := paymentdomainservice.NewWalletDomainService(walletChecker, walletReader, walletWriter)
 
-	// -----------------------------
-	// 4️⃣ Initialize Application Service
-	// -----------------------------
+	// initialize application services
 	registerService := accountappservice.NewRegisterAccountService(userAccountWriter, userAccountDomainService)
-	// other services like updateService, deleteService can be initialized here
+	depositService := paymentappservice.NewDepositFundService(walletWriter, walletDomainService)
 
-	// -----------------------------
-	// 5️⃣ Initialize Handlers
-	// -----------------------------
-
-	// accountHandler := accountpresenthttp.NewAccountHandler(registerService)
+	// initialize presentation handlers for all application services in each module
 	accountHandler := accountpresenthttp.NewAccountHandler(registerService)
+	paymentHandler := paymentpresenthttp.NewPaymentHandler(depositService)
 
-	// -----------------------------
-	// 6️⃣ Setup router
-	// -----------------------------
-	router := SetupRouter(accountHandler)
+	// register all routes
+	router := SetupRouter(accountHandler, paymentHandler)
 
-	// // -----------------------------
-	// // 6️⃣ Setup HTTP routes
-	// // -----------------------------
-	// accountpresenthttp.RegisterAccountRoutes(accountHandler)
-
-	// -----------------------------
-	// 7️⃣ Start server
-	// -----------------------------
+	// initialize context
 	port := env.GetEnvString("PORT", "8080")
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
+	}
 
-	if err := http.ListenAndServe(":"+port, router); err != nil {
-		log.Fatalf("failed to start server: %v", err)
+	// initialize context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // ensures resources are released
+
+	// prepare kafka producers/consumers
+	kafkaWriter := kafka.NewWriter(kafka.WriterConfig{
+		Brokers: []string{"localhost:9092"},
+	})
+	kafkaReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "user-created",
+		GroupID: "payment-module",
+	})
+	outboxDelivery := infrakafkaproducer.NewOutboxDelivery(db, kafkaWriter)
+	userCreatedConsumer := paymentinfraconsumer.NewUserCreatedConsumer(kafkaReader, walletDomainService)
+
+	// initialize server
+	go func() {
+		log.Println("HTTP server starting on port", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// initialize kafka producers/consumers
+	go outboxDelivery.Run(ctx)
+	go userCreatedConsumer.Run(ctx)
+
+	// wait for termination signal for kafka producers/consumers
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
+	log.Println("Shutting down...")
+
+	// shutdown kafka producers/consumers
+	cancel()
+
+	// shutdown HTTP server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("HTTP server shutdown failed: %v", err)
 	}
 }
-
-// package main
-
-// import (
-// 	"database/sql"
-// 	"log"
-// 	_ "rest-api-in-gin/docs"
-// 	"rest-api-in-gin/internal/database"
-// 	"rest-api-in-gin/internal/env"
-
-// 	_ "github.com/joho/godotenv/autoload"
-// 	_ "github.com/mattn/go-sqlite3"
-// )
-
-// // @title Go Gin Rest API
-// // @version 1.0
-// // @description A rest API in Go using Gin framework.
-// // @securityDefinitions.apikey BearerAuth
-// // @in header
-// // @name Authorization
-// // @description Enter your bearer token in the format **Bearer &lt;token&gt;**
-
-// // Apply the security definition to your endpoints
-// // @security BearerAuth
-
-// type application struct {
-// 	port      int
-// 	jwtSecret string
-// 	models    database.Models
-// }
-
-// func main() {
-
-// 	db, err := sql.Open("sqlite3", "./data.db")
-// 	if err != nil {
-// 		log.Fatal((err))
-// 	}
-
-// 	defer db.Close()
-
-// 	models := database.NewModels(db)
-
-// 	app := &application{
-// 		port:      env.GetEnvInt("PORT", 8080),
-// 		jwtSecret: env.GetEnvString("JWT_SECRET", "some-secret-123456"),
-// 		models:    models,
-// 	}
-
-// 	if err := app.serve(); err != nil {
-// 		log.Fatal(err)
-// 	}
-// }

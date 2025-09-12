@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// UserAccountChecker is a interface contract
+// UserAccountReader is a interface contract
 type UserAccountReader interface {
 	// TODO
 	GetByID(id uuid.UUID) (*entity.UserAccount, error)
