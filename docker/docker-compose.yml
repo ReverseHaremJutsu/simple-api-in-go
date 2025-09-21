@@ -24,4 +24,4 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0  # for consumer rebalancing
       CLUSTER_ID: "krg8c13fSPO0v7iEWRRDWg"
     volumes:
-      - ./data:/var/lib/kafka/data # the location of the volume is awkward for now
+      - ./kafka/data:/var/lib/kafka/data # the location of the volume is awkward for now
