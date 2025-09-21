@@ -14,6 +14,7 @@ import (
 
 	accountappservice "rest-api-in-gin/internal/account/application/service"
 	accountdomainservice "rest-api-in-gin/internal/account/domain/service"
+	accountinfraproducer "rest-api-in-gin/internal/account/infrastructure/kafka/producer"
 	accountinfrarepo "rest-api-in-gin/internal/account/infrastructure/repository"
 	accountpresenthttp "rest-api-in-gin/internal/account/presentation/http"
 
@@ -24,8 +25,8 @@ import (
 	paymentpresenthttp "rest-api-in-gin/internal/payment/presentation/http"
 
 	env "rest-api-in-gin/internal/env"
-	infrakafkaproducer "rest-api-in-gin/internal/infrastructure/kafka/producer"
-	persistence "rest-api-in-gin/internal/infrastructure/persistence"
+
+	persistence "rest-api-in-gin/internal/persistence"
 )
 
 func main() {
@@ -79,7 +80,7 @@ func main() {
 		Topic:   "user-created",
 		GroupID: "payment-module",
 	})
-	outboxDelivery := infrakafkaproducer.NewOutboxDelivery(db, kafkaWriter)
+	outboxDelivery := accountinfraproducer.NewOutboxDelivery(db, kafkaWriter)
 	userCreatedConsumer := paymentinfraconsumer.NewUserCreatedConsumer(kafkaReader, walletDomainService)
 
 	// initialize server
