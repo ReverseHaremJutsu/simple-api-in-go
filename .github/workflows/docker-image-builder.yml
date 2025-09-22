@@ -19,15 +19,16 @@ jobs:
     - name: Log in to Docker registry
       uses: docker/login-action@v2
       with:
-        registry: docker.io
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
     - name: Build and Push (multi-arch)
       uses: docker/build-push-action@v4
       with:
-        context: . # this is build context when we manual build locally
+        context: .
         file: docker/Dockerfile
         push: true
-        platforms: linux/amd64,linux/arm64 # for both amd and arm cpu archi
-        tags: docker.io/simple-api-in-go:${{ github.ref_name }}
+        platforms: linux/amd64,linux/arm64
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/simple-api-in-go:${{ github.ref_name }}
+          ${{ secrets.DOCKER_USERNAME }}/simple-api-in-go:latest
